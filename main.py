@@ -1,5 +1,5 @@
 import time
-from agents.camera_agent import camera_agent
+from agents.cctv_stream import camera_agent
 from agents.yolo_agent import yolo_agent
 from agents.officer_agent import officer_agent
 from agents.alertion_agent import alertion_agent
