@@ -152,10 +152,11 @@ class VideoSpeedEstimator:
         #維持一分鐘內的速度
         while self.speed_log and now - self.speed_log[0][0] > interval:
             self.speed_log.popleft()
+        # 以20公里起手
         if not self.speed_log:
-            return
+            return 20.0
         speeds = [v for t, v in self.speed_log]
-        med_speed  = np.median(speeds)
+        med_speed = np.median(speeds) +20
         return np.round(med_speed, 2)
     
     def _draw_density(self, frame, tracks, interval_m=50, max_range_m=400):
