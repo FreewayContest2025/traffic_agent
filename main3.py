@@ -1,3 +1,7 @@
+"""
+LLM 偵測
+"""
+
 import time
 from agents.cctv_stream import camera_agent
 from agents.yolo_agent import yolo_agent
