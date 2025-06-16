@@ -26,6 +26,7 @@ class VideoSpeedEstimator:
         conf_thres: float = 0.6,
         names_file: str = "category.names",
         frame_size: tuple[int, int] | None = None,
+        show_track_boxes: bool = False
     ):
         self.out_path = Path(output_video)
         # 統計 JSON 輸出檔路徑
@@ -35,6 +36,7 @@ class VideoSpeedEstimator:
         self.small_vehicle_ids = {2, 3}
         self.large_vehicle_ids = {4, 5} #truck, bus
         self.blur_id = blur_id
+        self.show_track_boxes = show_track_boxes  # control whether track boxes/labels are drawn
 
         # 讀影片
         # self.cap = cv2.VideoCapture(str(self.src_path))
@@ -149,14 +151,28 @@ class VideoSpeedEstimator:
 
     def _draw_speed_median(self, interval=60):
         now = time.time()
-        #維持一分鐘內的速度
-        while self.speed_log and now - self.speed_log[0][0] > interval:
-            self.speed_log.popleft()
-        # 以20公里起手
+        # 舊資料超過 60 秒則刪掉，只保留前 20 %
+        if self.speed_log and now - self.speed_log[0][0] > interval:
+            # 最新20%
+            keep = max(1, int(len(self.speed_log) * 0.2))   
+            latest_entries = list(self.speed_log)[-keep:]
+            self.speed_log = deque(latest_entries)
+        # 重整的話回傳 60 km/h 當保底
         if not self.speed_log:
-            return 20.0
-        speeds = [v for t, v in self.speed_log]
-        med_speed = np.median(speeds) +20
+            return 60.0
+        
+        # 時間觀察
+        # print("Oldest entry time:", datetime.fromtimestamp(self.speed_log[0][0]).strftime('%Y-%m-%d %H:%M:%S'))
+        # print("Current time:", datetime.fromtimestamp(now).strftime('%Y-%m-%d %H:%M:%S'))
+        # print("Time difference (seconds):", round(now - self.speed_log[0][0], 2))
+
+        # 以目前資料計算中位數
+        speeds = []
+        for _, v in self.speed_log:
+            # 初始值以 20 開始，因為推論不夠準
+            speeds.append(v + 20)
+        med_speed = np.median(speeds)
+
         return np.round(med_speed, 2)
     
     def _draw_density(self, frame, tracks, interval_m=50, max_range_m=400):
@@ -286,6 +302,9 @@ class VideoSpeedEstimator:
         v = self.speed_trk.update(tid, (mx, my))  # 丟給 SpeedTracker
         if v > 0:
             self.speed_log.append((time.time(), v)) 
+        # skip drawing if visual boxes are turned off
+        if not self.show_track_boxes:
+            return
         spd_txt = f"{v:.1f} km/h" if v else ""
 
         # 放大框

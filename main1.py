@@ -50,26 +50,16 @@ estimator = VideoSpeedEstimator(
 if not estimator.writer.isOpened():
     raise RuntimeError("❌ VideoWriter failed to open – check codec or path")
 
-def click_draw(event, x, y, flags, param):
-    if event == cv2.EVENT_LBUTTONDOWN:
-        print(f"({x}, {y})")
-        cv2.circle(param["frame"], (x, y), 4, (0, 255, 255), -1)
-
-cv2.namedWindow("Live Detection")
-click_param = {"frame": None}
-cv2.setMouseCallback("Live Detection", click_draw, click_param)
-
 # 讀串流並處理
 STREAM_URL = "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=13020"
 
 print("🚦開始讀取串流…")
-for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=5):
+for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=20):
     print("📸 新影像已抓取")
     start = time.time()
     processed = estimator.run(frame)
     print(f"🧠 推論耗時：{time.time() - start:.2f}s")
     # processed = estimator.run(frame)   # <-- Duplicate, removed
-    click_param["frame"] = processed
     print(f"latency: {latency:.3f}s per frame")
     cv2.imshow("Live Detection", processed)
     if cv2.waitKey(1) == 27:  # ESC 鍵離開
