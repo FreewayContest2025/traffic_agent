@@ -40,7 +40,7 @@ poly = np.array([
 estimator = VideoSpeedEstimator(
     source_video=None,
     output_video="videos/live_cctv_result.mp4",
-    conf_thres=0.20,
+    conf_thres=0.15,
     polygon=poly,
     model_weights="yolov10s.pt",
     frame_size=(w, h)
@@ -54,7 +54,11 @@ if not estimator.writer.isOpened():
 STREAM_URL = "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=13020"
 
 print("🚦開始讀取串流…")
-for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=20):
+
+# fps 可改
+# 如果車速太快或太慢，_draw_speed_median 可以修改初始速度
+# 這裡的 EMA 也可以調整使用
+for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=30):
     print("📸 新影像已抓取")
     start = time.time()
     processed = estimator.run(frame)

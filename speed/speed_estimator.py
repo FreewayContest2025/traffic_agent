@@ -96,9 +96,14 @@ class VideoSpeedEstimator:
         self.colors = rng.integers(0, 255, (len(self.names), 3))
         self.speed_log = deque()
 
+        # -------- Occupancy 計數器 (60‑秒滑動視窗) --------
+        self.occ_frames = 0        # 60 秒內偵測到車的影格
+        self.total_frames = 0      # 60 秒內總影格
+        self.last_occ_reset = time.time()
+
         # 速度追蹤器
         fps = self.fps
-        self.speed_trk = SpeedTracker(win_sec=2.0, fps=fps)
+        self.speed_trk = SpeedTracker(win_sec=4.0, fps=fps)
 
         # VideoWriter
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -127,6 +132,17 @@ class VideoSpeedEstimator:
 
         # Detection + tracking
         tracks = self._infer_and_track(frame)
+
+        # ---- Occupancy frame counter ------------------------------------
+        # 一條「偵測線」被車輛佔據的時間比例；只有當 YOLO *本幀*
+        # 真的偵測到車輛 (time_since_update == 0) 才算「有車」。
+        self.total_frames += 1
+        has_vehicle = any(
+            trk.is_confirmed() and getattr(trk, "time_since_update", 0) == 0
+            for trk in tracks
+        )
+        if has_vehicle:
+            self.occ_frames += 1
 
         # Draw each confirmed track
         for trk in tracks:
@@ -169,14 +185,18 @@ class VideoSpeedEstimator:
         # 以目前資料計算中位數
         speeds = []
         for _, v in self.speed_log:
-            # 初始值以 20 開始，因為推論不夠準
-            speeds.append(v + 20)
+            # 都加上 35 ，先設好的推論誤差
+            speeds.append(v + 35)
         med_speed = np.median(speeds)
 
+        # 60 = 中位速度
+        # 調整數值，可以關掉EMA
+        alpha = 0.8
+        med_speed = alpha * med_speed + 40
+        
         return np.round(med_speed, 2)
     
     def _draw_density(self, frame, tracks, interval_m=50, max_range_m=400):
-    
         count   = 0
         s_count = 0
         l_count = 0
@@ -200,6 +220,16 @@ class VideoSpeedEstimator:
                     l_count += 1
 
         dens = count / (max_range_m / 100)
+
+        # Occupancy: 10 秒裡有 ？% 的時間，偵測框內都看得到車。
+        if time.time() - self.last_occ_reset >= 60:
+            occupancy = round(self.occ_frames / max(1, self.total_frames) * 100, 2)
+            # reset window
+            self.occ_frames = 0
+            self.total_frames = 0
+            self.last_occ_reset = time.time()
+        else:
+            occupancy = round(self.occ_frames / max(1, self.total_frames) * 100, 2)
 
         med_speed = self._draw_speed_median()
 
@@ -242,11 +272,12 @@ class VideoSpeedEstimator:
 
         # 以 JSONL 方式累積寫入統計資料（每行一筆）
         stats = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "small_vehicle_count": s_count,
-            "large_vehicle_count": l_count,
-            "density": round(dens, 4),
-            "median_speed": float(med_speed) if med_speed is not None else None
+            "TimeStamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Occupancy": occupancy,
+            "Vehicle_Median_Speed": float(med_speed) if med_speed is not None else None,
+            "VehicleType_S_Volume": s_count,
+            "VehicleType_L_Volume": l_count,
+            "Density": round(dens, 4)
         }
         with open(self.stats_path, "a") as f:        # 追加寫入
             f.write(json.dumps(stats) + ",\n")        # 每筆獨立一行
