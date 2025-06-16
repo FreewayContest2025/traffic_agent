@@ -55,16 +55,17 @@ STREAM_URL = "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=13020"
 
 print("🚦開始讀取串流…")
 
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # fps 可改
 # 如果車速太快或太慢，_draw_speed_median 可以修改初始速度
-# 這裡的 EMA 也可以調整使用
+# 這裡的 EMA 也可以調整使用，已經不是 EMA 是我亂調的 哈哈哈
 for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=30):
-    print("📸 新影像已抓取")
+    print("1. 新影像已抓取")
     start = time.time()
     processed = estimator.run(frame)
-    print(f"🧠 推論耗時：{time.time() - start:.2f}s")
+    print(f"2. 推論耗時：{time.time() - start:.2f}s")
     # processed = estimator.run(frame)   # <-- Duplicate, removed
-    print(f"latency: {latency:.3f}s per frame")
+    print(f"3. latency: {latency:.3f}s per frame\n")
     cv2.imshow("Live Detection", processed)
     if cv2.waitKey(1) == 27:  # ESC 鍵離開
         break

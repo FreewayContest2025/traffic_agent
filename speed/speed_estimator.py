@@ -189,7 +189,7 @@ class VideoSpeedEstimator:
             speeds.append(v + 35)
         med_speed = np.median(speeds)
 
-        # 60 = 中位速度
+        # 40 = 中位速度
         # 調整數值，可以關掉EMA
         alpha = 0.8
         med_speed = alpha * med_speed + 40
