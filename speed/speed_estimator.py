@@ -274,7 +274,7 @@ class VideoSpeedEstimator:
         stats = {
             "TimeStamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Occupancy": occupancy,
-            "Vehicle_Median_Speed": float(med_speed) if med_speed is not None else None,
+            "Vehicle_Median_Speed": np.round(med_speed, 2) if med_speed is not None else None,
             "VehicleType_S_Volume": s_count,
             "VehicleType_L_Volume": l_count,
             "Density": round(dens, 4)
