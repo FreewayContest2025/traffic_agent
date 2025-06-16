@@ -59,7 +59,7 @@ print("🚦開始讀取串流…")
 # fps 可改
 # 如果車速太快或太慢，_draw_speed_median 可以修改初始速度
 # 這裡的 EMA 也可以調整使用，已經不是 EMA 是我亂調的 哈哈哈
-for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=30):
+for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=8):
     print("1. 新影像已抓取")
     start = time.time()
     processed = estimator.run(frame)
