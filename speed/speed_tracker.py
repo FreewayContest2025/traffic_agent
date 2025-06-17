@@ -6,7 +6,8 @@ class SpeedTracker:
     """每次 update 回傳 km/h 或 None"""
     
     # def __init__(self, win_sec=1.0, fps=24.0):  # highway.mp4: 測試用
-    def __init__(self, win_sec=4.0, fps=12.0): # cctv  48 fps
+    
+    def __init__(self, win_sec=2.0, fps=12.0): # cctv  48 fps
         self.fps = fps
         self.win = int(fps * win_sec)
         self.hist = {}         

@@ -5,7 +5,7 @@ LLM 偵測
 import time
 from agents.cctv_stream import camera_agent
 from agents.yolo_agent import yolo_agent
-from agents.officer_agent import officer_agent
+from agents.observer_agent import officer_agent
 from agents.alertion_agent import alertion_agent
 
 class traffic_agent:

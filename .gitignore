@@ -5,3 +5,4 @@ docs
 yolov10s.pt
 __pycache__
 yolov10m.pt
+.env

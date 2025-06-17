@@ -1,4 +1,4 @@
-{"TimeStamp": "2025-06-16 19:15:39", "Occupancy": 0.0, "Vehicle_Median_Speed": 60.0, "VehicleType_S_Volume": 0, "VehicleType_L_Volume": 0, "Density": 0.0},
+[ {"TimeStamp": "2025-06-16 19:15:39", "Occupancy": 0.0, "Vehicle_Median_Speed": 60.0, "VehicleType_S_Volume": 0, "VehicleType_L_Volume": 0, "Density": 0.0},
 {"TimeStamp": "2025-06-16 19:15:40", "Occupancy": 50.0, "Vehicle_Median_Speed": 60.0, "VehicleType_S_Volume": 1, "VehicleType_L_Volume": 0, "Density": 0.25},
 {"TimeStamp": "2025-06-16 19:15:40", "Occupancy": 33.33, "Vehicle_Median_Speed": 87.92, "VehicleType_S_Volume": 1, "VehicleType_L_Volume": 0, "Density": 0.25},
 {"TimeStamp": "2025-06-16 19:15:41", "Occupancy": 25.0, "Vehicle_Median_Speed": 87.94, "VehicleType_S_Volume": 1, "VehicleType_L_Volume": 0, "Density": 0.25},
@@ -212,4 +212,5 @@
 {"TimeStamp": "2025-06-16 19:17:59", "Occupancy": 12.0, "Vehicle_Median_Speed": 90.21, "VehicleType_S_Volume": 2, "VehicleType_L_Volume": 0, "Density": 0.5},
 {"TimeStamp": "2025-06-16 19:17:59", "Occupancy": 11.54, "Vehicle_Median_Speed": 90.21, "VehicleType_S_Volume": 2, "VehicleType_L_Volume": 0, "Density": 0.5},
 {"TimeStamp": "2025-06-16 19:18:00", "Occupancy": 11.11, "Vehicle_Median_Speed": 90.21, "VehicleType_S_Volume": 2, "VehicleType_L_Volume": 0, "Density": 0.5},
-{"TimeStamp": "2025-06-16 19:18:00", "Occupancy": 10.71, "Vehicle_Median_Speed": 90.21, "VehicleType_S_Volume": 2, "VehicleType_L_Volume": 0, "Density": 0.5},
+{"TimeStamp": "2025-06-16 19:18:00", "Occupancy": 10.71, "Vehicle_Median_Speed": 90.21, "VehicleType_S_Volume": 2, "VehicleType_L_Volume": 0, "Density": 0.5}
+]
