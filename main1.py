@@ -68,6 +68,7 @@ def analyze_camera(camera_id: str, sample_frames: int = 50):
     speeds = []
     vehicle_counts = []
     for idx, (frame, latency) in enumerate(
+        # 此處可調
         stream_to_numpy(STREAM_URL, width=w, height=h, fps=25)
     ):
         _ = estimator.run(frame)
