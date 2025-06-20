@@ -1,2 +1,3 @@
 opencv-python
 langchain_openai
+flask

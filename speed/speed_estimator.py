@@ -161,7 +161,27 @@ class VideoSpeedEstimator:
 
         # Save into output video
         self.writer.write(frame)
+        # --------------------------------------------------
+        # Expose latest_speed & latest_vehicle_count
+        # --------------------------------------------------
+        if self.speed_log:
+            last_entry = self.speed_log[-1]
+            # Case 1: stored as (timestamp, speed)
+            if isinstance(last_entry, tuple) and len(last_entry) == 2:
+                self.latest_speed = last_entry[1]
+            # Case 2: stored as dict
+            elif isinstance(last_entry, dict):
+                self.latest_speed = last_entry.get("Vehicle_Median_Speed")
+            else:
+                self.latest_speed = None
+        else:
+            self.latest_speed = None
 
+        # Count currently tracked vehicles
+        try:
+            self.latest_vehicle_count = len(self.speed_trk)
+        except Exception:
+            self.latest_vehicle_count = None
         return frame
 
 

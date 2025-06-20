@@ -8,8 +8,10 @@ import numpy as np
 import time
 import cv2
 import os
+import json
+from flask import Flask, jsonify, request, Response, stream_with_context
+app = Flask(__name__)
 os.makedirs("videos", exist_ok=True)   # 確保輸出資料夾存在
-import os
 # 以像素為單位
 # poly = np.array([
 #     [540, 480],  # 左下
@@ -46,33 +48,123 @@ estimator = VideoSpeedEstimator(
     frame_size=(w, h)
 )
 
-# 檢查 VideoWriter 是否成功開啟
-if not estimator.writer.isOpened():
-    raise RuntimeError("❌ VideoWriter failed to open – check codec or path")
+# ----------  RESTful service wrapper  ----------
 
-# 讀串流並處理
-STREAM_URL = "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=13020"
+def analyze_camera(camera_id: str, sample_frames: int = 50):
+    """
+    Sample a few frames from the given freeway CCTV camera, run the
+    YOLOv10-based VideoSpeedEstimator, and return simple metrics as a dict.
+    """
+    STREAM_URL = f"https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera={camera_id}"
+    estimator = VideoSpeedEstimator(
+        source_video=None,
+        output_video=f"videos/tmp_{camera_id}.mp4",  # temporary sink file
+        conf_thres=0.15,
+        polygon=poly,
+        model_weights="yolov10s.pt",
+        frame_size=(w, h)
+    )
 
-print("🚦開始讀取串流…")
+    speeds = []
+    vehicle_counts = []
+    for idx, (frame, latency) in enumerate(
+        stream_to_numpy(STREAM_URL, width=w, height=h, fps=25)
+    ):
+        _ = estimator.run(frame)
 
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# fps 可改
-# 如果車速太快或太慢，_draw_speed_median 可以修改初始速度
-# 這裡的 EMA 也可以調整使用，已經不是 EMA 是我亂調的 哈哈哈
-for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=8):
-    print("1. 新影像已抓取")
-    start = time.time()
-    processed = estimator.run(frame)
-    print(f"2. 推論耗時：{time.time() - start:.2f}s")
-    # processed = estimator.run(frame)   # <-- Duplicate, removed
-    print(f"3. latency: {latency:.3f}s per frame\n")
-    cv2.imshow("Live Detection", processed)
-    if cv2.waitKey(1) == 27:  # ESC 鍵離開
-        break
+        # These attributes depend on your VideoSpeedEstimator implementation.
+        # Replace them with the correct property/method names if different.
+        speed = getattr(estimator, "latest_speed", None)
+        count = getattr(estimator, "latest_vehicle_count", None)
 
-if estimator.writer is not None:
-    estimator.writer.release()
-    print(f"✅ Video saved to {estimator.out_path}")
-else:
-    print("⚠️ VideoWriter was not initialized.")
-cv2.destroyAllWindows()
+        if speed is not None:
+            speeds.append(speed)
+        if count is not None:
+            vehicle_counts.append(count)
+
+        if idx + 1 >= sample_frames:
+            break
+
+    result = {
+        "camera_id": camera_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+        "frames_sampled": len(speeds),
+        "average_speed": float(np.mean(speeds)) if speeds else None,
+        "average_vehicle_count": float(np.mean(vehicle_counts)) if vehicle_counts else None,
+    }
+    return result
+
+
+def monitor_stream(camera_id: str):
+    """
+    Yield newline-delimited JSON with live metrics.
+    Client example:
+        curl -N http://localhost:8000/api/traffic/stream?camera_id=13020
+    """
+    STREAM_URL = f"https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera={camera_id}"
+    estimator = VideoSpeedEstimator(
+        source_video=None,
+        output_video=f"videos/tmp_{camera_id}.mp4",
+        conf_thres=0.15,
+        polygon=poly,
+        model_weights="yolov10s.pt",
+        frame_size=(w, h)
+    )
+
+    for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=25):
+        _ = estimator.run(frame)
+        speed  = getattr(estimator, "latest_speed", None)
+        count  = getattr(estimator, "latest_vehicle_count", None)
+
+        data = {
+            "camera_id": camera_id,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+            "speed": speed,
+            "vehicle_count": count,
+        }
+        yield json.dumps(data) + "\n"
+
+
+@app.route("/api/traffic/stream", methods=["GET"])
+def traffic_stream():
+    """
+    Keep the HTTP connection open.
+    Continuously show "正在拍攝 <timestamp>" every second to the client,
+    while the server silently processes the CCTV stream in the background.
+    Example client:
+        curl -N http://localhost:8000/api/traffic/stream?camera_id=13020
+    """
+    camera_id = request.args.get("camera_id", default="13020")
+
+    # --- Start background detection thread (daemon) ---
+    def _bg_task():
+        for _ in monitor_stream(camera_id):
+            pass  # just consume to keep processing
+
+    import threading, time as _t
+    threading.Thread(target=_bg_task, daemon=True).start()
+
+    # --- Generator that keeps client connection alive ---
+    def _status_gen():
+        while True:
+            yield f"正在拍攝 {_t.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            _t.sleep(1)
+
+    return Response(stream_with_context(_status_gen()), mimetype="text/plain")
+
+
+@app.route("/api/traffic", methods=["GET"])
+def traffic_endpoint():
+    """
+    Example:
+        GET /api/traffic?camera_id=13020
+    """
+    camera_id = request.args.get("camera_id", default="13020")
+    frames = int(request.args.get("frames", default="50"))
+    data = analyze_camera(camera_id, frames)
+    return jsonify(data)
+
+
+if __name__ == "__main__":
+    print("🚦 Traffic agent API running at http://0.0.0.0:8000/api/traffic")
+    app.run(host="0.0.0.0", port=8000, debug=True)
