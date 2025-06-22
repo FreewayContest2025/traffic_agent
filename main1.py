@@ -8,8 +8,12 @@ import numpy as np
 import time
 import cv2
 import os
+
+# Directory containing JSON summaries; override via env TRAFFIC_JSON_DIR if needed
+JSON_DIR = os.environ.get("TRAFFIC_JSON_DIR", "videos")
+
 import json
-from flask import Flask, jsonify, request, Response, stream_with_context
+from flask import Flask, jsonify, request, Response, stream_with_context, send_file, abort
 app = Flask(__name__)
 os.makedirs("videos", exist_ok=True)   # 確保輸出資料夾存在
 # 以像素為單位
@@ -164,6 +168,39 @@ def traffic_endpoint():
     frames = int(request.args.get("frames", default="50"))
     data = analyze_camera(camera_id, frames)
     return jsonify(data)
+
+
+# --------- New route for serving video JSON ---------
+@app.route("/api/video_json", methods=["GET"])
+def video_json():
+    """
+    Return the JSON summary file for a given camera, e.g.
+        GET /api/video_json?camera_id=13020
+    looks for videos/tmp_<camera_id>.json  and streams it to the client.
+    If the file does not exist, responds with 404.
+    """
+    camera_id = request.args.get("camera_id", default="13020")
+    # Allow full filename override; otherwise construct from camera_id
+    filename = request.args.get("filename")
+    if filename:
+        json_path = filename
+    else:
+        json_path = os.path.join(JSON_DIR, f"tmp_{camera_id}.json")
+
+    if not os.path.isfile(json_path):
+        abort(404, description=f"No JSON found at {json_path}")
+
+    # Read file once
+    with open(json_path, "r", encoding="utf-8") as f:
+        raw = f.read()
+
+    # Try parse as a single JSON object/array
+    try:
+        payload = json.loads(raw)
+        return jsonify(payload)
+    except json.JSONDecodeError:
+        # Probably newline‑delimited JSON; return raw text
+        return Response(raw, mimetype="application/json")
 
 
 if __name__ == "__main__":
