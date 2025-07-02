@@ -37,17 +37,8 @@ class VideoSpeedEstimator:
         self.large_vehicle_ids = {4, 5} #truck, bus
         self.blur_id = blur_id
         self.show_track_boxes = show_track_boxes  # control whether track boxes/labels are drawn
-
-        # 讀影片
-        # self.cap = cv2.VideoCapture(str(self.src_path))
-        # if not self.cap.isOpened():
-        #     raise FileNotFoundError(f"Cannot open {self.src_path}")
-        
-        # # get video width, height, fps
-        # self.w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        # self.h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        # self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-
+        print("⚙️ stats_path =", self.stats_path.resolve())
+        self.stats_path.parent.mkdir(parents=True, exist_ok=True)
         # --- Handle live‑stream mode (no source_video) -----------------
         if source_video is None:
             self.cap = None
@@ -100,6 +91,13 @@ class VideoSpeedEstimator:
         self.occ_frames = 0        # 60 秒內偵測到車的影格
         self.total_frames = 0      # 60 秒內總影格
         self.last_occ_reset = time.time()
+
+        # -------- 1‑minute 車流量 (vehicles per second) --------
+        # window_max_vehicle_count : 目前 60‑秒視窗內偵測到的「最大同時車輛數」
+        # last_one_minute_flow     : 上一視窗依最大車數推算的每秒車流量
+        self.window_max_vehicle_count = 0
+        self.last_vol_reset = time.time()     # 視窗起始時間
+        self.last_one_minute_flow = 0.0
 
         # 速度追蹤器
         fps = self.fps
@@ -217,7 +215,7 @@ class VideoSpeedEstimator:
         return np.round(med_speed, 2)
     
     def _draw_density(self, frame, tracks, interval_m=50, max_range_m=400):
-        count   = 0
+        count   = 0         
         s_count = 0
         l_count = 0
 
@@ -232,6 +230,7 @@ class VideoSpeedEstimator:
                 continue
             _, my = self._pixel_to_bev((cx,cy))
             id = trk.get_det_class()
+            # 總車輛計算還有區分
             if 0 <= my <= max_range_m:
                 count += 1
                 if id in self.small_vehicle_ids:
@@ -240,7 +239,7 @@ class VideoSpeedEstimator:
                     l_count += 1
 
         dens = count / (max_range_m / 100)
-
+        
         # Occupancy: 10 秒裡有 ？% 的時間，偵測框內都看得到車。
         if time.time() - self.last_occ_reset >= 60:
             occupancy = round(self.occ_frames / max(1, self.total_frames) * 100, 2)
@@ -252,6 +251,21 @@ class VideoSpeedEstimator:
             occupancy = round(self.occ_frames / max(1, self.total_frames) * 100, 2)
 
         med_speed = self._draw_speed_median()
+
+        # ---- 1‑minute flow (vehicles per second) 計算 ----
+        # 更新目前視窗內的最大同時車輛數
+        self.window_max_vehicle_count = max(self.window_max_vehicle_count, count)
+
+        # 若視窗已滿 60 秒，計算上一視窗統計並重置
+        if time.time() - self.last_vol_reset >= 60:
+            # 以上一視窗的最大同時車輛數估算每秒流量
+            self.last_one_minute_flow = round(self.window_max_vehicle_count / 60, 4)
+            # 重置視窗
+            self.window_max_vehicle_count = count  # 以當前幀作為新視窗初值
+            self.last_vol_reset = time.time()
+
+        one_minute_flow = self.last_one_minute_flow
+        one_minute_max_count = self.window_max_vehicle_count
 
         text1 = f"Small vehicles count: {s_count}"
         (text_w1, text_h1), _ = cv2.getTextSize(text1, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
@@ -297,18 +311,12 @@ class VideoSpeedEstimator:
             "Vehicle_Median_Speed": np.round(med_speed, 2) if med_speed is not None else None,
             "VehicleType_S_Volume": s_count,
             "VehicleType_L_Volume": l_count,
-            "Density": round(dens, 4)
+            "1_minute_flow": one_minute_flow,
+            "Density": round(dens, 4),
+            "one_minute_max_count": one_minute_max_count
         }
         with open(self.stats_path, "a") as f:        # 追加寫入
             f.write(json.dumps(stats) + ",\n")        # 每筆獨立一行
-    # def _draw_density_boundary(self, frame, max_range_m=400):
-    #     # 在 BEV 空間中找對應的 Y 座標（也就是 max_range_m 對應的點）
-    #     bev_point = np.array([[[0, max_range_m]]], dtype=np.float32)
-    #     img_point = cv2.perspectiveTransform(bev_point, np.linalg.inv(self.M))[0][0]
-    #     px, py = map(int, img_point)
-
-    #     # 畫一條橫線表示 500 公尺的邊界
-    #     cv2.line(frame, (0, py), (self.w, py), (0, 255, 255), 2)
 
 
     def _infer_and_track(self, frame):
@@ -332,6 +340,7 @@ class VideoSpeedEstimator:
                 dets.append([[x1, y1, x2 - x1, y2 - y1], conf, cid])
 
         return self.tracker.update_tracks(dets, frame=frame)
+
 
     # 加了會不準，但好像才是對的
     def _pixel_to_bev(self, pt):
@@ -357,12 +366,6 @@ class VideoSpeedEstimator:
         if not self.show_track_boxes:
             return
         spd_txt = f"{v:.1f} km/h" if v else ""
-
-        # 放大框
-        # w, h = x2 - x1, y2 - y1
-        # pad_w, pad_h = int((scale - 1) / 2 * w), int((scale - 1) / 2 * h)
-        # x1, y1 = max(0, x1 - pad_w), max(0, y1 - pad_h)
-        # x2, y2 = min(self.w - 1, x2 + pad_w), min(self.h - 1, y2 + pad_h)
 
         cid = trk.get_det_class()
 
