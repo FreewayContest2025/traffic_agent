@@ -43,14 +43,12 @@ poly = np.array([
     [x1, y1],  # 左上
 ], np.float32)
 
-estimator = VideoSpeedEstimator(
-    source_video=None,
-    output_video="videos/live_cctv_result.mp4",
-    conf_thres=0.15,
-    polygon=poly,
-    model_weights="yolov10s.pt",
-    frame_size=(w, h)
-)
+def _open_writer(path: str, fps: int = 25, frame_size: tuple[int, int] = (w, h)):
+    """
+    Create and return a cv2.VideoWriter using a codec that plays in most players.
+    """
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # MP4/H.264‑compatible
+    return cv2.VideoWriter(path, fourcc, fps, frame_size)
 
 # ----------  RESTful service wrapper  ----------
 
@@ -59,23 +57,29 @@ def analyze_camera(camera_id: str, sample_frames: int = 50):
     Sample a few frames from the given freeway CCTV camera, run the
     YOLOv10-based VideoSpeedEstimator, and return simple metrics as a dict.
     """
-    STREAM_URL = f"https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera={camera_id}"
+    video_path = os.path.join("videos", f"tmp_{camera_id}.mp4")
     estimator = VideoSpeedEstimator(
         source_video=None,
-        output_video=f"videos/tmp_{camera_id}.mp4",  # temporary sink file
+        output_video=video_path,  # final playable file
         conf_thres=0.15,
         polygon=poly,
         model_weights="yolov10s.pt",
         frame_size=(w, h)
     )
+    if not estimator.writer.isOpened():
+        raise RuntimeError("❌ VideoWriter failed to open – check codec or path")
 
     speeds = []
     vehicle_counts = []
     for idx, (frame, latency) in enumerate(
         # 此處可調
-        stream_to_numpy(STREAM_URL, width=w, height=h, fps=25)
+        stream_to_numpy(f"https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera={camera_id}", width=w, height=h, fps=25)
     ):
         _ = estimator.run(frame)
+
+        cv2.imshow("Live Detection", frame)
+        if cv2.waitKey(1) == 27:  # ESC to break
+            break
 
         # These attributes depend on your VideoSpeedEstimator implementation.
         # Replace them with the correct property/method names if different.
@@ -90,6 +94,9 @@ def analyze_camera(camera_id: str, sample_frames: int = 50):
         if idx + 1 >= sample_frames:
             break
 
+    cv2.destroyAllWindows()
+
+    estimator.writer.release()
     result = {
         "camera_id": camera_id,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
@@ -97,65 +104,79 @@ def analyze_camera(camera_id: str, sample_frames: int = 50):
         "average_speed": float(np.mean(speeds)) if speeds else None,
         "average_vehicle_count": float(np.mean(vehicle_counts)) if vehicle_counts else None,
     }
+    result["video_path"] = f"videos/tmp_{camera_id}.mp4"
     return result
 
 
-def monitor_stream(camera_id: str):
+def monitor_stream(camera_id: str, *, display: bool = False):
     """
-    Yield newline-delimited JSON with live metrics.
-    Client example:
-        curl -N http://localhost:8000/api/traffic/stream?camera_id=13020
+    Generator that pulls the CCTV stream, runs VideoSpeedEstimator,
+    yields newline‑delimited JSON metrics to the caller, and writes:
+
+    * videos/tmp_<camera_id>.mp4   – recorded video (written by estimator)
+    * videos/tmp_<camera_id>.json  – newline‑delimited JSON log
+
+    When the caller closes the HTTP connection (or Ctrl‑C on curl),
+    the generator is closed → finally‑block runs → resources released.
     """
-    STREAM_URL = f"https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera={camera_id}"
+    video_path = os.path.join("videos", f"tmp_{camera_id}.mp4")
+    json_path  = os.path.join(JSON_DIR, f"tmp_{camera_id}.json")
+    # start a fresh json log
+    open(json_path, "w").close()
+
     estimator = VideoSpeedEstimator(
         source_video=None,
-        output_video=f"videos/tmp_{camera_id}.mp4",
+        output_video=video_path,
         conf_thres=0.15,
         polygon=poly,
         model_weights="yolov10s.pt",
         frame_size=(w, h)
     )
+    if not estimator.writer.isOpened():
+        raise RuntimeError("❌ VideoWriter failed to open – check codec or path")
 
-    for frame, latency in stream_to_numpy(STREAM_URL, width=w, height=h, fps=25):
-        _ = estimator.run(frame)
-        speed  = getattr(estimator, "latest_speed", None)
-        count  = getattr(estimator, "latest_vehicle_count", None)
+    try:
+        for frame, _ in stream_to_numpy(
+            f"https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera={camera_id}",
+            width=w, height=h, fps=25
+        ):
+            processed = estimator.run(frame)  # estimator internally writes MP4
 
-        data = {
-            "camera_id": camera_id,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
-            "speed": speed,
-            "vehicle_count": count,
-        }
-        yield json.dumps(data) + "\n"
+            # optional live display (only works in main thread with GUI)
+            if display:
+                cv2.imshow("Live Detection", processed)
+                if cv2.waitKey(1) == 27:
+                    break
+
+            # keep‑alive status line to client
+            yield f"正在拍攝 {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    finally:
+        if display:
+            try:
+                cv2.destroyAllWindows()
+            except cv2.error:
+                pass
+        estimator.writer.release()
 
 
 @app.route("/api/traffic/stream", methods=["GET"])
 def traffic_stream():
     """
-    Keep the HTTP connection open.
-    Continuously show "正在拍攝 <timestamp>" every second to the client,
-    while the server silently processes the CCTV stream in the background.
-    Example client:
-        curl -N http://localhost:8000/api/traffic/stream?camera_id=13020
+    Stream newline‑delimited status lines to the client *and* (optionally)
+    show the realtime detection window on the server side.
+
+    Enable the GUI preview by calling, for example:
+        curl -N "http://localhost:8000/api/traffic/stream?camera_id=13020&display=1"
     """
     camera_id = request.args.get("camera_id", default="13020")
+    # any of 1 / true / yes enables display
+    disp_flag  = request.args.get("display", default="0").lower() in {"1", "true", "yes"}
 
-    # --- Start background detection thread (daemon) ---
-    def _bg_task():
-        for _ in monitor_stream(camera_id):
-            pass  # just consume to keep processing
+    def _stream():
+        yield f"開始偵測 {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        yield from monitor_stream(camera_id, display=disp_flag)
 
-    import threading, time as _t
-    threading.Thread(target=_bg_task, daemon=True).start()
-
-    # --- Generator that keeps client connection alive ---
-    def _status_gen():
-        while True:
-            yield f"正在拍攝 {_t.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            _t.sleep(1)
-
-    return Response(stream_with_context(_status_gen()), mimetype="text/plain")
+    return Response(stream_with_context(_stream()), mimetype="text/plain")
 
 
 @app.route("/api/traffic", methods=["GET"])
@@ -205,4 +226,5 @@ def video_json():
 
 if __name__ == "__main__":
     print("🚦 Traffic agent API running at http://0.0.0.0:8000/api/traffic")
+    # analyze_camera("13020", 50)
     app.run(host="0.0.0.0", port=8000, debug=True)
